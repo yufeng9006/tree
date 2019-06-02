@@ -1,10 +1,3 @@
-### 加密-解密
-经常用到系统间的交互，通过构建秘钥，识别秘钥达到交互数据的认证。
-
-php 中常用的加密方式有：md5，base64
-
-如果构建一个对称加密，给系统交互使用
-`
 <?php
 function encode64($str='', $pwdStr = 'csff'){
     $strArr = str_split($str);
@@ -29,5 +22,3 @@ function decode64($str='', $pwdStr = 'csff'){
     $encode_str = str_replace($pwdStr,'',$encode_str,strlen($pwdStr));
     return $encode_str;
 }
-
-`
