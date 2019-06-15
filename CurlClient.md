@@ -11,7 +11,8 @@ curl_setopt 第一个为会话资源变量，第二个参数为需要设置的�
     5, 设置请求时间参数 CURLOPT_TIMEOUT 如果不设置会导致，执行脚本进程僵死，可通过ps aux 命令查看异常进程。<br>
     6, 请求设置后需要执行 curl_exec 执行抓单，释放资源，curl_close. CURLOPT_RETURNTRANSFER true时候说明数据不打印，直接赋值变量<br>
     7, 其中 http 特殊字符 ：（+，空格，/ ? %# & ）不论使用工具进行补单。<br>
-`<?php
+```
+<?php
 
 class CurlClient
 {
@@ -44,4 +45,4 @@ class CurlClient
         return $output;
     }
 }
-`
+```
