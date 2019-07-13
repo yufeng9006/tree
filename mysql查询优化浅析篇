@@ -1,0 +1,148 @@
+#### mysql慢查询分析
+
+mysql如何知道有制造出慢查询？
+
+开启慢查询日志：
+
+```
+show variables like '%slow_query%';### 查看是否存在开启慢查询log，一般设置2s
+> SET GLOBAL log_slow_queries=on;
+> SET GLOBAL long_query_time=0.1;
+> SET GLOBAL long_queries_not_using_indexes=on;
+设置开启慢查询，
+设置慢查询记录时间为 0.1s
+设置记录没有使用索引的查询
+```
+
+慢查询log日常迁移。需要把log 迁移到其他位置，避免查看不方便
+
+```shell
+#!/bin/bash
+datenum=`date -d "yesterday" +%Y-%m-%d`
+##echo $datenum
+mv /data/logs/mysql/slow_${datenum}.log /data/logs/mysql/back
+```
+
+优先解决执行消耗最大时间的sql与被记录次数最多的sql
+
+```
+mysqldumpslow -s t -t 10 slow_xxx.log > /data/web/xxx/storage/logs/slow_at_top_sql.txt
+## 执行时间最久的10条sql
+mysqldumpslow -s c -t 10 slow_xxx.log > /data/web/xxx/storage/logs/slow_at_top_sql.txt
+## 执行次数最多的sql
+```
+
+分析慢查询具体sql
+
+```
+# Time: 2019-07-13T08:01:15.107209+08:00
+# User@Host: xxx[xxx] @  [xxx.xxx.14.117]  Id: 33163087
+# Query_time: 3.073006  Lock_time: 0.000073 Rows_sent: 0  Rows_examined: 54750
+SET timestamp=1562976075;
+select * from `om_unshipped_order` as `om_o` left join `om_unshipped_order_userInfo` as `om_uou` on `om_uou`.`omOrderId` = `om_o`.`id` where (`om_o`.`is_delete` = 0 and `om_o`.`paymentTime` >= 1562515200 and `om_o`.`paymentTime` < 1562601600 and `om_o`.`platformId` = 96 and `om_o`.`orderType` = 220) limit 800 offset 0;
+```
+
+time sql 记录时间
+
+host 请求来源ip地址
+
+Query_time 执行时间
+
+Lock_time 每条锁定时间
+
+Rows_examined 查询检查的行数
+
+1，explain 分析语句，查看使用索引情况
+
+```
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: om_o
+   partitions: NULL
+         type: ref
+possible_keys: paymentTime,platformId_only
+          key: platformId_only
+      key_len: 4
+          ref: const
+         rows: 56232
+     filtered: 0.01
+        Extra: Using where
+*************************** 2. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: om_uou
+   partitions: NULL
+         type: eq_ref
+possible_keys: omOrderId
+          key: omOrderId
+      key_len: 4
+          ref: wukongdatabase.om_o.id
+         rows: 1
+     filtered: 100.00
+        Extra: NULL
+2 rows in set, 1 warning (0.00 sec)
+```
+
+possible_keys 使用的索引
+
+key 使用索引
+
+rows 扫描行数
+
+了解业务的才是最能优化的程序员，原表有覆盖索引 orderStatus orderType
+
+优化为：
+
+```
+explain select * from `om_unshipped_order` as `om_o` left join `om_unshipped_order_userInfo` as `om_uou` on `om_uou`.`omOrderId` = `om_o`.`id` where (`om_o`.`is_delete` = 0 and `om_o`.`platformId` = 96 and om_o.orderStatus=210 and `om_o`.`orderType` = 220  AND `om_o`.`paymentTime` >= 1562515200 and `om_o`.`paymentTime` < 1562601600 ) limit 800 offset 0\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: om_o
+   partitions: NULL
+         type: index_merge
+possible_keys: paymentTime,platformId_only,list_search_init
+          key: list_search_init,platformId_only
+      key_len: 12,4
+          ref: NULL
+         rows: 243
+     filtered: 0.60
+        Extra: Using intersect(list_search_init,platformId_only); Using where
+*************************** 2. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: om_uou
+   partitions: NULL
+         type: eq_ref
+possible_keys: omOrderId
+          key: omOrderId
+      key_len: 4
+          ref: wukongdatabase.om_o.id
+         rows: 1
+     filtered: 100.00
+        Extra: NULL
+2 rows in set, 1 warning (0.00 sec)
+```
+
+```
+mysql> select * from `om_unshipped_order` as `om_o` left join `om_unshipped_order_userInfo` as `om_uou` on `om_uou`.`omOrderId` = `om_o`.`id` where (`om_o`.`is_delete` = 0 and `om_o`.`platformId` = 96 and om_o.orderStatus=210 and `om_o`.`orderType` = 220  AND `om_o`.`paymentTime` >= 1562515210 and `om_o`.`paymentTime` < 1562601600 ) limit 800 offset 0;
+ERROR 2006 (HY000): MySQL server has gone away
+No connection. Trying to reconnect...
+Connection id:    33222607
+Current database: xxx
+
+Empty set (0.71 sec)
+```
+
+覆盖索引有一个最左前缀原则，索引利用需要从左边一列开始扫描，如果没有左边列参与查询，索引不会被使用。
+
+总结：
+
+binlog记录日志
+
+sql优化，建立合理索引。
+
+explain 分析
+
+充分理解业务逻辑，设计表具有良好扩展性。常见，三范式，反三范式
